@@ -68,33 +68,7 @@ class TestSettingsManager(object):
         self._original_settings = {}
 
 
-
-
-class PriorityTestCase(unittest.TestCase):
-    mimetypes = ('text/plain', 'application/xml', 'text/html', 'application/json')
-
-    CONNEG_OVERRIDE_PRIORITY = (
-            ('html', 1),
-            ('json', 2),
-            ('xml', 3),
-            ('plain', 4)
-            )
-
-    CLS_OVERRIDE_PRIORITY = (
-            ('html', 1),
-            ('json', 4),
-            ('xml', 3),
-            ('plain', 2)
-            )
-
-    def __init__(self, *args, **kwargs):
-        super(PriorityTestCase, self).__init__(*args, **kwargs)
-        self.settings_manager = TestSettingsManager()
-        sys.modules['testtemplates'] = TestTemplate()
-
-    def tearDown(self):
-        self.settings_manager.revert()
-
+class ConnegTests(object):
     def getRenderer(self, _format, mimetypes, name, priority):
         if not isinstance(mimetypes, tuple):
             mimetypes = (mimetypes,)
@@ -164,6 +138,32 @@ class PriorityTestCase(unittest.TestCase):
         sys.modules['testurlconfmodule'] = testUrlConf
         testurlconfmodule = __import__('testurlconfmodule')
         self.settings_manager.set(ROOT_URLCONF=testurlconfmodule)
+
+class PriorityTestCase(unittest.TestCase, ConnegTests):
+    mimetypes = ('text/plain', 'application/xml', 'text/html', 'application/json')
+
+    CONNEG_OVERRIDE_PRIORITY = (
+            ('html', 1),
+            ('json', 2),
+            ('xml', 3),
+            ('plain', 4)
+            )
+
+    CLS_OVERRIDE_PRIORITY = (
+            ('html', 1),
+            ('json', 4),
+            ('xml', 3),
+            ('plain', 2)
+            )
+
+    def __init__(self, *args, **kwargs):
+        super(PriorityTestCase, self).__init__(*args, **kwargs)
+        self.settings_manager = TestSettingsManager()
+        sys.modules['testtemplates'] = TestTemplate()
+
+    def tearDown(self):
+        self.settings_manager.revert()
+
 
     ###########################
     # Tests Begin
@@ -306,8 +306,88 @@ class PriorityTestCase(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.content, 'test json ok')
         self.assertEqual(res._headers,
-                {'vary': ('Vary', 'Accept'),
+                {'vary': ('Vary', 'Accept, Negotiate'),
                  'content-type': ('Content-Type', 'application/json')})
+
+class NegotiateTestCase(unittest.TestCase, ConnegTests):
+    mimetypes = ('text/plain', 'application/xml', 'text/html', 'application/json')
+
+    CONNEG_OVERRIDE_PRIORITY = (
+            ('html', 1),
+            ('json', 2),
+            ('xml', 3),
+            ('plain', 4)
+            )
+
+    def __init__(self, *args, **kwargs):
+        super(NegotiateTestCase, self).__init__(*args, **kwargs)
+        self.settings_manager = TestSettingsManager()
+        sys.modules['testtemplates'] = TestTemplate()
+
+    def tearDown(self):
+        self.settings_manager.revert()
+
+    def testNegotiateServerChoice(self):
+        """
+        Checks headers, status_code and content for -- negotiate: *
+        """
+        testurl = "testurl"
+        priorities = dict((mimetype, -i) for i, mimetype in enumerate(self.mimetypes))
+        testView = self.getTestTemplateView(priorities)
+        self.setURLConf(testView, testurl)
+
+        cc = Client(HTTP_ACCEPT="*/*", HTTP_NEGOTIATE="*")
+        res = cc.get("/%s" % testurl)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res._headers,
+{'tcn': ('TCN', 'choice'), 'vary': ('Vary', 'Accept, Negotiate'), 'content-type': ('Content-Type', 'text/plain'), 'alternates': ('Alternates', '{"/testurl?format=plain" 1 {type text/plain {length 13}} {"/testurl?format=xml" 1 {type application/xml {length 11}} {"/testurl?format=html" 1 {type text/html {length 12}} {"/testurl?format=json" 1 {type application/json {length 12}} ')}
+        )
+        self.assertEqual(res.content, 'test plain ok')
+
+    def testNegotiateTrans(self):
+        """
+        Checks headers, status_code and content for -- negotiate: trans
+        """
+        testurl = "testurl"
+        priorities = dict((mimetype, -i) for i, mimetype in enumerate(self.mimetypes))
+        testView = self.getTestTemplateView(priorities)
+        self.setURLConf(testView, testurl)
+
+        cc = Client(HTTP_ACCEPT="*/*", HTTP_NEGOTIATE="trans")
+        res = cc.get("/%s" % testurl)
+        self.assertEqual(res.status_code, 300)
+        self.assertEqual(res._headers,
+{'tcn': ('TCN', 'list'), 'vary': ('Vary', 'Accept, Negotiate'), 'content-type': ('Content-Type', 'text/html'), 'alternates': ('Alternates', '{"/testurl?format=plain" 1 {type text/plain {length 13}} {"/testurl?format=xml" 1 {type application/xml {length 11}} {"/testurl?format=html" 1 {type text/html {length 12}} {"/testurl?format=json" 1 {type application/json {length 12}} ')}
+        )
+        self.assertEqual(res.content,
+"""<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+<html><head>
+<title>300 Multiple Choices</title>
+</head><body>
+<h1>Multiple Choices</h1>
+Available variants:
+<ul>
+ <li><a href="/testurl?format=html">None</a> , type text/html</li>
+ <li><a href="/testurl?format=json">None</a> , type application/json</li>
+ <li><a href="/testurl?format=plain">None</a> , type text/plain</li>
+ <li><a href="/testurl?format=xml">None</a> , type application/xml</li>
+</ul>
+</body></html>""")
+
+    def testBadNegotiate(self):
+        """
+        Checks headers, status_code for -- negotiate: badheader
+        """
+        testurl = "testurl"
+        priorities = dict((mimetype, -i) for i, mimetype in enumerate(self.mimetypes))
+        testView = self.getTestTemplateView(priorities)
+        self.setURLConf(testView, testurl)
+
+        cc = Client(HTTP_ACCEPT="*/*", HTTP_NEGOTIATE="badheader")
+        res = cc.get("/%s" % testurl)
+        self.assertEqual(res.status_code, 406)
+        self.assertEqual(res._headers, {'tcn': ('TCN', 'list'), 'vary': ('Vary', 'Accept, Negotiate'), 'content-type': ('Content-Type', 'text/plain'), 'alternates': ('Alternates', '{"/testurl?format=plain" 1 {type text/plain {length 13}} {"/testurl?format=xml" 1 {type application/xml {length 11}} {"/testurl?format=html" 1 {type text/html {length 12}} {"/testurl?format=json" 1 {type application/json {length 12}} ')}
+        )
 
 
 if __name__ == '__main__':
