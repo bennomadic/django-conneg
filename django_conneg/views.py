@@ -38,6 +38,7 @@ class ContentNegotiatedView(View):
     _prefetched = False
     _template_used = None
     _context_used = None
+    _args_used = None
 
 
     @classonlymethod
@@ -111,6 +112,7 @@ class ContentNegotiatedView(View):
         # when cycling over all alternates.
         self._template_used = template_name
         self._context_used = context
+        self._args_used = (self.args, self.kwargs)
 
         status_code = context.pop('status_code', httplib.OK)
         additional_headers = context.pop('additional_headers', {})
@@ -199,7 +201,11 @@ class ContentNegotiatedView(View):
             meta = self.request.META
             nval = meta[nhead]
             meta[nhead] = ""
-            pre_get = self.get(self.request)
+            _args, _kwargs = self._args_used
+            if any((_args, _kwargs)):
+                _pre_get = self.get(self.request, *_args, **_kwargs)
+            else:
+                pre_get = self.get(self.request)
             meta[nhead] = nval
 
         for r in self._renderers:
