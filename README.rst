@@ -128,9 +128,68 @@ attribute on the response object::
             return response 
 
 
-Testing
--------
+Renderer priorities
+-------------------
 
-From the root of the repository, run::
+Some user-agents might specify various media types with equal levels of
+desirability. For example, previous versions of Safari and Chrome `used to send
+<http://www.gethifi.com/blog/browser-rest-http-accept-headers#highlighter_222123>`_
+an ``Accept`` header like this::
+
+     application/xml,application/xhtml+xml,text/html;q=0.9,
+     text/plain;q=0.8,image/png,*/*;q=0.5
+
+Without any additional hints it would be non-deterministic as to whether XML or
+XHTML is served.
+
+By passing a ``priority`` argument to the ``@renderer`` decorator you can
+specify an ordering of renderers for such ambiguous situations::
+
+     class IndexView(ContentNegotiatedView):
+         @renderer(format='xml', mimetypes=('application/xml',), name='XML', priority=0)
+         def render_xml(request, context, template_name):
+             # ...
+
+         @renderer(format='html', mimetypes=('application/xhtml+xml','text/html), name='HTML', priority=1)
+         def render_html(request, context, template_name):
+             # ...
+
+As higher-numbered priorities are preferred, this will result in HTML always
+being prefered over XML in ambiguous situations.
+
+By default, ``django-conneg``'s built-in renderers have a priority of 0, except
+for ``HTMLView`` and ``TextView``, which each have a priority of 1 for the
+reason given above.
+
+Overriding priorities
+---------------------
+
+Priorities for renderers can be changed either setting a site-wide parameter, or setting a custom
+attribute in a given class View. Both must be a tuple of the form ``((format, priority),)``. For instance,
+the following is a valid settings entry:: 
+
+    CONNEG_OVERRIDE_PRIORITY = (
+              ('html', 1),
+              ('json', 2),
+              ('xml', 3),
+              ('plain', 4)
+              )
+
+And the following is a custom class override, which takes precedence over the former::
+
+    class SampleContentNegView(RDFaView, HTMLView, JSONView):
+	_override_priority = (
+		('html', 4),
+		('json', 3),
+		('xml', 2),
+		('plain', 1)
+		)
+
+
+Running the tests
+-----------------
+
+``django-conneg`` has a modest test suite. To run it, head to the root of the
+repository and run::
 
     django-admin.py test --settings=django_conneg.test_settings --pythonpath=.
